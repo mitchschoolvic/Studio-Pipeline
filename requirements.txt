@@ -1,0 +1,31 @@
+# Studio Pipeline - Standard Build Requirements
+# Core dependencies for video processing pipeline (no AI/LLM features)
+
+# Web Framework
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+pydantic==2.10.0
+python-multipart==0.0.20
+websockets==12.0
+
+# Database
+sqlalchemy==2.0.36
+
+# FTP Client
+aioftp==0.22.3
+
+# Filesystem Monitoring
+watchdog>=3.0.0
+
+# System Integration
+keyring==25.5.0
+
+# Audio Processing (neural net denoiser)
+numpy>=1.26.0
+soundfile>=0.12.0
+librosa>=0.10.0
+onnxruntime>=1.16.0
+
+# Gesture Detection (video trimming)
+mediapipe>=0.10.0
+opencv-python-headless>=4.8.0

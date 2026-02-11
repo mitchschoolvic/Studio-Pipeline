@@ -1,0 +1,100 @@
+import React from 'react';
+import { ArrowRight, Folder, Download, Cpu, FolderTree, Upload } from 'lucide-react';
+
+export default function VideoProcessingPipeline() {
+  const basicSteps = [
+    { title: "DISCOVER", subtitle: "FTP", icon: Folder },
+    { title: "COPY", subtitle: "Download", icon: Download }
+  ];
+
+  const endSteps = [
+    { title: "ORGANIZE", subtitle: "File tree", icon: FolderTree },
+    { title: "COMPLETE", subtitle: "Upload to Sharepoint", icon: Upload }
+  ];
+
+  const processSteps = [
+    "Extract audio",
+    "Analyse and adjust volume to correct levels",
+    "Enhance voice/remove Noise",
+    "Remux enhanced audio back into .mp4",
+    "Detect and trim 'stop' hand gesture"
+  ];
+
+  const BasicStep = ({ step }) => {
+    const Icon = step.icon;
+    return (
+      <div className="flex flex-col items-center gap-2">
+        <div className="bg-slate-700/50 rounded-lg p-3 border border-slate-600">
+          <Icon className="w-5 h-5 text-slate-400" />
+        </div>
+        <div className="text-center">
+          <div className="text-xs font-semibold text-slate-300">{step.title}</div>
+          <div className="text-xs text-slate-500">{step.subtitle}</div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="w-full bg-slate-900 p-8 rounded-lg">
+      <div className="max-w-7xl mx-auto">
+        <h2 className="text-2xl font-bold text-slate-200 text-center mb-8">
+          Video Processing Pipeline
+        </h2>
+
+        <div className="flex items-center justify-center gap-6">
+          {/* Basic Steps - Left */}
+          <div className="flex items-center gap-4">
+            {basicSteps.map((step, index) => (
+              <React.Fragment key={index}>
+                <BasicStep step={step} />
+                <ArrowRight className="w-5 h-5 text-slate-600" />
+              </React.Fragment>
+            ))}
+          </div>
+
+          {/* Processing Section - Center */}
+          <div className="flex-1 max-w-2xl">
+            <div className="bg-slate-800 border-2 border-slate-600 rounded-lg p-6">
+              <div className="flex items-center gap-3 mb-4 pb-4 border-b border-slate-700">
+                <div className="bg-slate-700 rounded p-2">
+                  <Cpu className="w-6 h-6 text-slate-300" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-200">PROCESS</h3>
+                  <p className="text-sm text-slate-400">Audio Enhancement</p>
+                </div>
+              </div>
+              
+              <div className="space-y-2.5">
+                {processSteps.map((step, index) => (
+                  <div key={index} className="flex items-start gap-3 group">
+                    <div className="mt-1.5 flex-shrink-0 w-5 h-5 rounded-full bg-slate-700 flex items-center justify-center text-xs font-mono text-slate-400">
+                      {index + 1}
+                    </div>
+                    <span className="text-sm text-slate-300 leading-relaxed">
+                      {step}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Basic Steps - Right */}
+          <div className="flex items-center gap-4">
+            <ArrowRight className="w-5 h-5 text-slate-600" />
+            {endSteps.map((step, index) => (
+              <React.Fragment key={index}>
+                <BasicStep step={step} />
+                {index < endSteps.length - 1 && (
+                  <ArrowRight className="w-5 h-5 text-slate-600" />
+                )}
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

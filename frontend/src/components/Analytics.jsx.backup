@@ -1,0 +1,1220 @@
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { ErrorBoundary } from './ErrorBoundary';
+import { ChevronRight, Mic, X, CheckCircle, Brain, FolderOpen, RotateCcw, Pause, Play, AlertTriangle } from 'lucide-react';
+import { formatDateTime } from '../utils/dateUtils';
+import { useSelectMode } from '../contexts/SelectModeContext';
+import { SessionCheckbox } from './SessionCheckbox';
+import { SessionToolbar } from './SessionToolbar';
+import { SelectModeToolbar } from './SelectModeToolbar';
+import { useSessionFilters } from '../hooks/useSessionFilters';
+import { SORT_OPTIONS } from '../utils/sessionFilters';
+import { FileThumbnail } from './FileThumbnail';
+import { useSessions } from '../contexts/SessionsContext';
+
+function AnalyticsInner() {
+  const selectMode = useSelectMode();
+  // Prefer shared sessions from SessionsProvider; fall back to local state if unavailable
+  const { sessions: sharedSessions, ensureSessionFiles } = useSessions();
+  const [sessions, setSessions] = useState([]);
+  const [analyticsData, setAnalyticsData] = useState([]);
+  const [expandedSession, setExpandedSession] = useState(null);
+  const [selectedTranscript, setSelectedTranscript] = useState(null);
+  const [transcriptLoadingId, setTranscriptLoadingId] = useState(null);
+  const [transcriptError, setTranscriptError] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Search and sort state
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortOption, setSortOption] = useState(SORT_OPTIONS.NEWEST);
+
+  // Analytics pause state
+  const [analyticsPaused, setAnalyticsPaused] = useState(true); // Default to paused
+  const [queuedCount, setQueuedCount] = useState(0);
+  const [runningJobId, setRunningJobId] = useState(null);
+  const [runWhenIdle, setRunWhenIdle] = useState(true); // Default to run only when idle
+  const observedSessionsRef = useRef(new Set());
+  const observerRef = useRef(null);
+  const sessionElementsRef = useRef(new Map()); // Track all session card elements
+
+  useEffect(() => {
+    // If shared sessions available, hydrate from context; otherwise fetch locally
+    if (sharedSessions && sharedSessions.length > 0) {
+      setSessions(sharedSessions);
+      setLoading(false);
+    } else {
+      fetchSessions();
+    }
+    fetchAnalytics();
+    fetchPauseStatus();
+    fetchRunWhenIdleSetting();
+
+    // Fallback slow polling ONLY if WebSocket is disconnected (window.wsConnected flag can be set by WebSocket hook)
+    let timer;
+    let cancelled = false;
+    const pollIfDisconnected = async () => {
+      if (cancelled) return;
+      if (!window.wsConnected) {
+        await Promise.all([
+          fetchSessions(),
+          fetchAnalytics(),
+          fetchPauseStatus(),
+          fetchRunWhenIdleSetting()
+        ]);
+      }
+      timer = setTimeout(pollIfDisconnected, 30000); // 30s fallback
+    };
+    pollIfDisconnected();
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Helper: coerce various server shapes into an array of files
+  const ensureFilesArray = (files) => {
+    if (Array.isArray(files)) return files;
+    if (files && typeof files === 'object') return Object.values(files);
+    return [];
+  };
+
+  // Helper: safe date formatting; avoid showing "Invalid Date"
+  const safeFormatDateTime = (value) => {
+    try {
+      if (!value) return 'Unknown date';
+      const d = new Date(value);
+      if (isNaN(d.getTime())) return 'Unknown date';
+      return formatDateTime(value);
+    } catch {
+      return 'Unknown date';
+    }
+  };
+
+  const fetchSessions = async () => {
+    try {
+      const response = await fetch('/api/sessions');
+      if (!response.ok) throw new Error('Failed to fetch sessions');
+      const data = await response.json();
+      // Normalize sessions to always have an array for files
+      const normalized = (Array.isArray(data) ? data : []).map(s => ({
+        ...s,
+        files: ensureFilesArray(s.files)
+      }));
+      setSessions(normalized);
+      setError(null);
+    } catch (err) {
+      console.error('Error fetching sessions:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Lazy-load files for a specific session when needed
+  // ⚠️ CHANGED: Only fetch 1 file per session for card header (primary file)
+  // Full files will be fetched on expand if needed
+  const fetchSessionFiles = async (sessionId, { limit = 1, offset = 0 } = {}) => {
+    try {
+      // Use shared store hydrator when available for cross-tab cache benefits
+      if (ensureSessionFiles) {
+        await ensureSessionFiles(sessionId, { limit, offset });
+        // Also mirror into local state to keep existing code paths stable
+        const shared = (sharedSessions || []).find(s => s.id === sessionId);
+        if (shared && Array.isArray(shared.files)) {
+          setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, files: shared.files } : s));
+          return;
+        }
+      }
+      // Fallback direct fetch
+      const resp = await fetch(`/api/sessions/${sessionId}/files?limit=${limit}&offset=${offset}`, {
+        cache: 'no-cache',
+        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || `Failed to fetch files for session ${sessionId}`);
+      }
+      const files = await resp.json();
+      const normalizedFiles = ensureFilesArray(files);
+      setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, files: normalizedFiles } : s));
+    } catch (e) {
+      console.error('Error fetching session files:', e);
+    }
+  };
+
+  // Keep local sessions mirrored with shared sessions for live updates
+  useEffect(() => {
+    if (sharedSessions && sharedSessions.length > 0) {
+      setSessions(sharedSessions);
+      setLoading(false);
+    }
+  }, [sharedSessions]);
+
+  const fetchAnalytics = async () => {
+    try {
+      const response = await fetch('/api/analytics/');
+      if (!response.ok) throw new Error('Failed to fetch analytics');
+      const data = await response.json();
+      setAnalyticsData(data);
+    } catch (err) {
+      console.error('Error fetching analytics:', err);
+    }
+  };
+
+  // Build a mapping of session_id -> analytics array for status without loading files
+  const analyticsBySession = useMemo(() => {
+    const map = new Map();
+    for (const a of analyticsData || []) {
+      const sid = a.session_id;
+      if (!sid) continue;
+      if (!map.has(sid)) map.set(sid, []);
+      map.get(sid).push(a);
+    }
+    return map;
+  }, [analyticsData]);
+
+  const fetchPauseStatus = async () => {
+    try {
+      const response = await fetch('/api/analytics/pause-status');
+      if (!response.ok) throw new Error('Failed to fetch pause status');
+      const data = await response.json();
+      setAnalyticsPaused(data.paused);
+      setQueuedCount(data.queued_count);
+      setRunningJobId(data.running_job_id);
+    } catch (err) {
+      console.error('Error fetching pause status:', err);
+    }
+  };
+
+  const toggleAnalyticsPause = async () => {
+    try {
+      const response = await fetch('/api/analytics/toggle-pause', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to toggle analytics pause');
+      }
+
+      const result = await response.json();
+      setAnalyticsPaused(result.paused);
+
+      // Refresh data
+      fetchPauseStatus();
+      fetchAnalytics();
+
+      // Show success message
+      const action = result.paused ? 'paused' : 'resumed';
+      alert(`Analytics ${action}!\n${result.message}`);
+    } catch (error) {
+      console.error('Error toggling analytics pause:', error);
+      alert(`Failed to toggle analytics: ${error.message}`);
+    }
+  };
+
+  const fetchRunWhenIdleSetting = async () => {
+    try {
+      const response = await fetch('/api/analytics/settings/run-when-idle');
+      if (!response.ok) throw new Error('Failed to fetch run when idle setting');
+      const data = await response.json();
+      setRunWhenIdle(data.enabled);
+    } catch (err) {
+      console.error('Error fetching run when idle setting:', err);
+    }
+  };
+
+  const toggleRunWhenIdle = async () => {
+    try {
+      const response = await fetch('/api/analytics/settings/run-when-idle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !runWhenIdle })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to toggle run when idle');
+      }
+
+      const result = await response.json();
+      setRunWhenIdle(result.enabled);
+
+      // Refresh settings
+      fetchRunWhenIdleSetting();
+
+      // Show success message
+      alert(`Settings updated!\n${result.message}`);
+    } catch (error) {
+      console.error('Error toggling run when idle:', error);
+      alert(`Failed to update setting: ${error.message}`);
+    }
+  };
+
+  // Get analytics for a session's files
+  const getSessionAnalytics = (session) => {
+    // Prefer direct lookup by session_id if available from API
+    if (analyticsBySession.has(session.id)) {
+      const arr = analyticsBySession.get(session.id) || [];
+      return arr.map(a => ({ file: null, analytics: a }));
+    }
+    // Fallback to joining via files if session_id is not provided
+    const files = ensureFilesArray(session?.files);
+    return files
+      .map(file => {
+        const analytics = (analyticsData || []).find(a => a.file_id === file.id);
+        return analytics ? { file, analytics } : null;
+      })
+      .filter(Boolean);
+  };
+
+  // Get analytics indicator status for a session
+  const getAnalyticsStatus = (session) => {
+    const sessionAnalytics = getSessionAnalytics(session);
+    if (sessionAnalytics.length === 0) return 'none';
+
+    const hasCompleted = sessionAnalytics.some(a => a.analytics.state === 'COMPLETED');
+    const hasTranscribing = sessionAnalytics.some(a => a.analytics.state === 'TRANSCRIBING');
+    const hasAnalyzing = sessionAnalytics.some(a => a.analytics.state === 'ANALYZING');
+    const hasFailed = sessionAnalytics.some(a => a.analytics.state === 'FAILED');
+
+    if (hasCompleted) return 'completed';
+    if (hasAnalyzing) return 'analyzing';
+    if (hasTranscribing) return 'transcribing';
+    if (hasFailed) return 'failed';
+    return 'pending';
+  };
+
+  // IntersectionObserver to load thumbnails (files) when session cards enter viewport
+  useEffect(() => {
+    // Clear the observed set when sessions change
+    observedSessionsRef.current.clear();
+
+    const observer = new IntersectionObserver((entries) => {
+      console.log('[IntersectionObserver] Entries:', entries.length);
+      for (const entry of entries) {
+        const el = entry.target;
+        const sessionId = el.getAttribute('data-session-id');
+        console.log('[IntersectionObserver] Session:', sessionId, 'Intersecting:', entry.isIntersecting);
+        if (!entry.isIntersecting || !sessionId) continue;
+        if (observedSessionsRef.current.has(sessionId)) {
+          console.log('[IntersectionObserver] Already observed:', sessionId);
+          continue;
+        }
+        observedSessionsRef.current.add(sessionId);
+
+        // Access sessions from state at the time of observation
+        setSessions(currentSessions => {
+          const s = currentSessions.find(s => s.id === sessionId);
+          if (!s) {
+            console.log('[IntersectionObserver] Session not found:', sessionId);
+            return currentSessions;
+          }
+          const files = ensureFilesArray(s.files);
+          const fileCount = typeof s.file_count === 'number' ? s.file_count : files.length;
+          console.log('[IntersectionObserver] Session:', sessionId, 'files.length:', files.length, 'fileCount:', fileCount);
+          if (files.length === 0 && fileCount > 0) {
+            console.log('[IntersectionObserver] Fetching files for session:', sessionId);
+            fetchSessionFiles(sessionId);
+          }
+          return currentSessions; // Don't modify state
+        });
+      }
+    }, { root: null, rootMargin: '200px', threshold: 0.1 });
+
+    observerRef.current = observer;
+
+    // Re-observe all existing elements with the new observer
+    console.log('[IntersectionObserver] Re-observing', sessionElementsRef.current.size, 'elements');
+    sessionElementsRef.current.forEach((el, sessionId) => {
+      console.log('[IntersectionObserver] Re-observing session:', sessionId);
+      observer.observe(el);
+    });
+
+    return () => {
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+        observerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessions]);
+
+  // Ref callback to attach observer to each session card
+  const sessionCardRef = useCallback((el) => {
+    const sessionId = el?.getAttribute('data-session-id');
+
+    if (!el || !sessionId) {
+      // Element is being unmounted, remove from tracking
+      if (!el && sessionId) {
+        sessionElementsRef.current.delete(sessionId);
+      }
+      return;
+    }
+
+    // Track this element
+    sessionElementsRef.current.set(sessionId, el);
+    console.log('[sessionCardRef] Tracking session:', sessionId);
+
+    if (observerRef.current) {
+      console.log('[sessionCardRef] Observing session:', sessionId);
+      observerRef.current.observe(el);
+    } else {
+      console.warn('[sessionCardRef] Observer not ready for session:', sessionId);
+    }
+  }, []);
+
+  const getStatusColor = (status) => {
+    const colors = {
+      none: 'bg-gray-100 text-gray-500',
+      pending: 'bg-blue-100 text-blue-600',
+      transcribing: 'bg-yellow-100 text-yellow-700',
+      analyzing: 'bg-purple-100 text-purple-600',
+      completed: 'bg-green-100 text-green-700',
+      failed: 'bg-red-100 text-red-600',
+    };
+    return colors[status] || colors.none;
+  };
+
+  const getStatusLabel = (status) => {
+    const labels = {
+      none: 'No Analytics',
+      pending: 'Pending',
+      transcribing: 'Transcribing',
+      analyzing: 'Analyzing',
+      completed: 'Completed',
+      failed: 'Failed',
+    };
+    return labels[status] || 'Unknown';
+  };
+
+  const formatBytes = (bytes) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+  };
+
+  const handleOpenFolder = async (e, fileId) => {
+    e.stopPropagation(); // Prevent expanding/collapsing the card
+
+    try {
+      const response = await fetch(`/api/analytics/${fileId}/open-folder`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        alert(`Failed to open folder: ${error.detail || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error opening folder:', error);
+      alert('Failed to open folder. Please check console for details.');
+    }
+  };
+
+  // Apply search and sort filters (must be called before any conditional returns)
+  const filteredSessions = useSessionFilters(sessions, searchTerm, sortOption);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-900/20 border border-red-500 rounded-lg p-4">
+        <p className="text-red-400">Error: {error}</p>
+        <button
+          onClick={() => {
+            fetchSessions();
+            fetchAnalytics();
+          }}
+          className="mt-2 px-4 py-2 bg-red-600 hover:bg-red-700 rounded text-white"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (sessions.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <Brain className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+          <p className="text-lg font-medium text-gray-600">No sessions found</p>
+          <p className="text-sm text-gray-500 mt-2">
+            Sessions will appear here after files are processed
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Session Toolbar - Search and Sort */}
+      {!loading && sessions.length > 0 && (
+        <div>
+          <SessionToolbar
+            searchTerm={searchTerm}
+            onSearchChange={setSearchTerm}
+            sortOption={sortOption}
+            onSortChange={setSortOption}
+            showClearMissing={false}
+            showRetryFailed={false}
+            totalSessions={filteredSessions.length}
+          />
+
+          {/* Pause/Resume Analytics Button */}
+          <div className={`border-b px-4 py-2 flex items-center justify-between ${
+            analyticsPaused ? 'bg-orange-50 border-orange-200' : 'bg-green-50 border-green-200'
+          }`}>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={toggleAnalyticsPause}
+                className={`px-3 py-1.5 text-white text-sm rounded font-medium transition-colors flex items-center gap-2 ${
+                  analyticsPaused
+                    ? 'bg-green-600 hover:bg-green-700'
+                    : 'bg-orange-600 hover:bg-orange-700'
+                }`}
+                title={analyticsPaused ? 'Resume analytics processing' : 'Pause analytics processing'}
+              >
+                {analyticsPaused ? (
+                  <>
+                    <Play className="w-4 h-4" />
+                    Resume Analytics
+                  </>
+                ) : (
+                  <>
+                    <Pause className="w-4 h-4" />
+                    Pause Analytics
+                  </>
+                )}
+              </button>
+
+              {/* Status Info */}
+              <div className="text-xs text-gray-600">
+                {analyticsPaused ? (
+                  <span className="font-medium text-orange-700">Analytics Paused</span>
+                ) : (
+                  <span className="font-medium text-green-700">Analytics Running</span>
+                )}
+                {queuedCount > 0 && (
+                  <span className="ml-2">• {queuedCount} job{queuedCount !== 1 ? 's' : ''} queued</span>
+                )}
+                {runningJobId && (
+                  <span className="ml-2">• Processing...</span>
+                )}
+              </div>
+
+              {/* Run When Idle Toggle */}
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={runWhenIdle}
+                  onChange={toggleRunWhenIdle}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-xs text-gray-600">
+                  Run only when pipeline is idle
+                </span>
+              </label>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Select Mode Toolbar */}
+      {selectMode.isSelectMode && (
+        <SelectModeToolbar
+          selectedCount={selectMode.selectedCount}
+          totalCount={filteredSessions.length}
+          onSelectAll={() => selectMode.selectAll(filteredSessions.map(s => s.id))}
+          onDeselectAll={selectMode.clearSelection}
+          onCancel={selectMode.exitSelectMode}
+          activeTab="analytics"
+        />
+      )}
+
+      {/* Sessions List */}
+      {filteredSessions.length === 0 && sessions.length > 0 ? (
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <p className="text-lg font-medium text-gray-600">No sessions match this filter</p>
+            <p className="text-sm text-gray-500 mt-2">Try adjusting your search or sort options</p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex-1 overflow-auto p-4">
+          <div className="space-y-3">
+            {filteredSessions.map((session, sessionIndex) => {
+            const files = ensureFilesArray(session.files);
+            const fileCount = typeof session.file_count === 'number' ? session.file_count : files.length;
+            const hasNoFiles = fileCount === 0 && files.length === 0;
+            const programFile = files.find(f => f.is_program_output);
+            const analyticsStatus = getAnalyticsStatus(session);
+            const sessionAnalytics = getSessionAnalytics(session);
+            const isExpanded = expandedSession === session.id;
+            const isSelected = selectMode.isSelected(session.id);
+
+            return (
+              <div
+                key={session.id}
+                className={`bg-white border rounded-lg shadow-sm transition-all duration-150 ${
+                  selectMode.isSelectMode
+                    ? isSelected
+                      ? 'border-blue-500 ring-2 ring-blue-200'
+                      : 'border-gray-200 hover:border-blue-300'
+                    : 'border-gray-200 hover:shadow-md'
+                }`}
+                data-session-id={session.id}
+                ref={sessionCardRef}
+              >
+                {/* Session Header */}
+                <div
+                  className={`p-4 transition-colors ${
+                    selectMode.isSelectMode
+                      ? 'cursor-pointer hover:bg-blue-50'
+                      : 'cursor-pointer hover:bg-gray-50'
+                  }`}
+                  onClick={(e) => {
+                    if (selectMode.isSelectMode) {
+                      // In select mode, clicking the card toggles selection
+                      if (e.shiftKey) {
+                        selectMode.handleShiftClick(
+                          session.id,
+                          filteredSessions.map(s => s.id),
+                          sessionIndex
+                        );
+                      } else {
+                        selectMode.handleRegularClick(session.id, sessionIndex);
+                      }
+                    } else {
+                      // Normal mode, expand/collapse
+                      const nextExpanded = isExpanded ? null : session.id;
+                      setExpandedSession(nextExpanded);
+                      // If expanding, fetch all files for analytics details (not just the 1 primary file)
+                      if (!isExpanded && nextExpanded === session.id) {
+                        const files = ensureFilesArray(session.files);
+                        const fileCount = typeof session.file_count === 'number' ? session.file_count : files.length;
+                        // Fetch all files if we only have 1 or 0 files (only the primary was loaded for card header)
+                        if (fileCount > 1 && files.length <= 1) {
+                          fetchSessionFiles(session.id, { limit: 200, offset: 0 });
+                        }
+                      }
+                    }
+                  }}
+                >
+                  <div className="flex items-start gap-4">
+                    {/* Checkbox in select mode, chevron in normal mode */}
+                    {selectMode.isSelectMode ? (
+                      <SessionCheckbox
+                        isSelected={isSelected}
+                        onChange={() => selectMode.toggleSessionSelection(session.id)}
+                        sessionId={session.id}
+                      />
+                    ) : (
+                      <div className="flex-shrink-0 pt-1">
+                        <ChevronRight
+                          className={`w-5 h-5 text-gray-400 transition-transform ${
+                            isExpanded ? 'rotate-90' : ''
+                          }`}
+                        />
+                      </div>
+                    )}
+
+                    {/* Thumbnail */}
+                    <div className="flex-shrink-0">
+                      {programFile ? (
+                        <FileThumbnail
+                          fileId={programFile.id}
+                          isEmpty={programFile.is_empty}
+                          className="w-32 h-20 rounded border border-gray-300"
+                        />
+                      ) : (
+                        <div className="w-32 h-20 bg-gray-100 rounded border border-gray-300 flex items-center justify-center">
+                          {fileCount > 0 ? (
+                            <span className="text-gray-500 text-xs">{fileCount} file{fileCount !== 1 ? 's' : ''}</span>
+                          ) : (
+                            <span className="text-gray-400 text-xs">No files</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Session Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-gray-800 text-lg truncate">
+                            {session.name}
+                          </h3>
+                          <p className="text-sm text-gray-500 mt-1">
+                            {safeFormatDateTime(session.discovered_at)} • {fileCount} files • {formatBytes(session.total_size)}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Analytics Indicator, Missing Files Badge, and Folder Button */}
+                      <div className="mt-2 flex items-center gap-2">
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(
+                            analyticsStatus
+                          )}`}
+                        >
+                          <Brain className="w-3 h-3" />
+                          {getStatusLabel(analyticsStatus)}
+                          {sessionAnalytics.length > 0 && (
+                            <span className="ml-1">({sessionAnalytics.length})</span>
+                          )}
+                        </span>
+
+                        {hasNoFiles && (
+                          <span
+                            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700 border border-red-300"
+                            title="Session has no discovered files; analytics cannot run."
+                          >
+                            <AlertTriangle className="w-3 h-3" />
+                            No Files
+                          </span>
+                        )}
+
+                        {/* Open folder button - show if any file in session has external_export_path */}
+                        {!selectMode.isSelectMode && 
+                         files.some(file => file.external_export_path) && (
+                          <button
+                            onClick={(e) => {
+                              // Find first file with external_export_path
+                              const fileWithPath = files.find(file => file.external_export_path);
+                              if (fileWithPath) {
+                                handleOpenFolder(e, fileWithPath.id);
+                              }
+                            }}
+                            className="p-1.5 hover:bg-gray-200 rounded-lg transition-colors group"
+                            title="Open AI Analytics folder"
+                          >
+                            <FolderOpen className="w-4 h-4 text-gray-600 group-hover:text-blue-600" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Expanded Analytics Section - don't show in select mode */}
+                {!selectMode.isSelectMode && isExpanded && sessionAnalytics.length > 0 && (
+                  <div className="border-t border-gray-200 bg-gray-50 p-4">
+                    <div className="space-y-3">
+                      {sessionAnalytics.map(({ file, analytics }) => (
+                        <div
+                          key={analytics.id}
+                          className="bg-white border border-gray-200 rounded-lg p-4"
+                        >
+                          {/* File Name */}
+                          <div className="flex items-center gap-2 mb-3">
+                            <Mic className="w-4 h-4 text-gray-500" />
+                            <h4 className="font-medium text-gray-800">
+                              {analytics.filename || file.filename}
+                            </h4>
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
+                                analytics.state.toLowerCase()
+                              )}`}
+                            >
+                              {analytics.state}
+                            </span>
+                          </div>
+
+                          {/* Language Badge */}
+                          {analytics.detected_language && (
+                            <div className="mb-3">
+                              <span className="inline-flex items-center gap-1 text-xs text-gray-600 bg-gray-100 px-2 py-1 rounded">
+                                <CheckCircle className="w-3 h-3" />
+                                Language: {analytics.detected_language}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Parsed Analysis Data */}
+                          {analytics.state === 'COMPLETED' && (analytics.title || analytics.description) && (
+                            <div className="mb-4">
+                              <div className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                                Analysis Results
+                              </div>
+                              <div className="bg-gradient-to-br from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-4 space-y-3">
+                                {/* Title */}
+                                {analytics.title && (
+                                  <div>
+                                    <div className="text-xs font-medium text-gray-600 mb-1">Title</div>
+                                    <div className="text-sm font-semibold text-gray-900">{analytics.title}</div>
+                                  </div>
+                                )}
+
+                                {/* Description */}
+                                {analytics.description && (
+                                  <div>
+                                    <div className="text-xs font-medium text-gray-600 mb-1">Description</div>
+                                    <div className="text-sm text-gray-800">{analytics.description}</div>
+                                  </div>
+                                )}
+
+                                {/* Content Type & Faculty */}
+                                <div className="grid grid-cols-2 gap-3">
+                                  {analytics.content_type && (
+                                    <div>
+                                      <div className="text-xs font-medium text-gray-600 mb-1">Content Type</div>
+                                      <div className="inline-flex items-center px-2 py-1 bg-white border border-blue-300 rounded text-xs font-medium text-blue-700">
+                                        {analytics.content_type}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {analytics.faculty && (
+                                    <div>
+                                      <div className="text-xs font-medium text-gray-600 mb-1">Faculty</div>
+                                      <div className="inline-flex items-center px-2 py-1 bg-white border border-purple-300 rounded text-xs font-medium text-purple-700">
+                                        {analytics.faculty}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Speaker & Audience Types */}
+                                <div className="grid grid-cols-2 gap-3">
+                                  {analytics.speaker_type && (() => {
+                                    try {
+                                      const types = JSON.parse(analytics.speaker_type);
+                                      return (
+                                        <div>
+                                          <div className="text-xs font-medium text-gray-600 mb-1">Speaker Type</div>
+                                          <div className="flex flex-wrap gap-1">
+                                            {types.map((type, idx) => (
+                                              <span key={idx} className="inline-flex items-center px-2 py-0.5 bg-green-100 border border-green-300 rounded text-xs font-medium text-green-700">
+                                                {type}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      );
+                                    } catch (e) {
+                                      console.error('Failed to parse speaker_type:', e, analytics.speaker_type);
+                                      return null;
+                                    }
+                                  })()}
+                                  {analytics.audience_type && (() => {
+                                    try {
+                                      const types = JSON.parse(analytics.audience_type);
+                                      return (
+                                        <div>
+                                          <div className="text-xs font-medium text-gray-600 mb-1">Audience Type</div>
+                                          <div className="flex flex-wrap gap-1">
+                                            {types.map((type, idx) => (
+                                              <span key={idx} className="inline-flex items-center px-2 py-0.5 bg-orange-100 border border-orange-300 rounded text-xs font-medium text-orange-700">
+                                                {type}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      );
+                                    } catch (e) {
+                                      console.error('Failed to parse audience_type:', e, analytics.audience_type);
+                                      return null;
+                                    }
+                                  })()}
+                                </div>
+
+                                {/* Speaker Count */}
+                                {analytics.speaker_count !== null && analytics.speaker_count !== undefined && (
+                                  <div>
+                                    <div className="text-xs font-medium text-gray-600 mb-1">Speaker Count</div>
+                                    <div className="inline-flex items-center px-2 py-1 bg-white border border-gray-300 rounded text-xs font-semibold text-gray-900">
+                                      {analytics.speaker_count} {analytics.speaker_count === 1 ? 'person' : 'people'}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Transcript (lazy fetch capable) */}
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="text-xs font-semibold text-gray-500 uppercase">
+                                Transcript
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    if (!confirm(`Reprocess "${analytics.filename || file.filename}"?\n\nThis will:\n• Reset file to DISCOVERED state\n• Restart entire processing pipeline\n• Extract new audio file\n• Queue new transcription and analysis`)) {
+                                      return;
+                                    }
+                                    try {
+                                      const response = await fetch(`/api/files/${analytics.file_id}/reprocess`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' }
+                                      });
+                                      if (!response.ok) {
+                                        const error = await response.json();
+                                        throw new Error(error.detail || 'Failed to trigger reprocessing');
+                                      }
+                                      const result = await response.json();
+                                      alert(`Reprocessing queued successfully!\n${result.message}\nJob ID: ${result.job_id}`);
+                                      fetchSessions();
+                                      fetchAnalytics();
+                                    } catch (error) {
+                                      console.error('Error triggering reprocessing:', error);
+                                      alert(`Failed to trigger reprocessing: ${error.message}`);
+                                    }
+                                  }}
+                                  className="px-3 py-1 bg-orange-600 hover:bg-orange-700 text-white text-xs rounded font-medium transition-colors flex items-center gap-1"
+                                  title="Reprocess entire file from scratch (useful if audio extraction failed)"
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                  Re-process
+                                </button>
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    if (!confirm(`Re-transcribe "${analytics.filename || file.filename}"?\n\nThis will:\n• Clear existing transcript and analysis\n• Use current Whisper settings (including prompt words)\n• Queue a new transcription job`)) {
+                                      return;
+                                    }
+                                    try {
+                                      const response = await fetch(`/api/analytics/${analytics.file_id}/re-transcribe`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' }
+                                      });
+                                      if (!response.ok) {
+                                        const error = await response.json();
+                                        throw new Error(error.detail || 'Failed to trigger re-transcription');
+                                      }
+                                      const result = await response.json();
+                                      alert(`Re-transcription queued successfully!\n${result.message}\nJob ID: ${result.job_id}`);
+                                      fetchAnalytics();
+                                    } catch (error) {
+                                      console.error('Error triggering re-transcription:', error);
+                                      alert(`Failed to trigger re-transcription: ${error.message}`);
+                                    }
+                                  }}
+                                  className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded font-medium transition-colors flex items-center gap-1"
+                                  title="Re-transcribe with current Whisper settings (including prompt words)"
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                  Re-transcribe
+                                </button>
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    if (!confirm(`Trigger LLM analysis for "${analytics.filename || file.filename}"?`)) {
+                                      return;
+                                    }
+                                    try {
+                                      const response = await fetch(`/api/analytics/${analytics.file_id}/analyze`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' }
+                                      });
+                                      if (!response.ok) {
+                                        const error = await response.json();
+                                        throw new Error(error.detail || 'Failed to trigger analysis');
+                                      }
+                                      const result = await response.json();
+                                      alert(`Analysis queued successfully!\nJob ID: ${result.job_id}`);
+                                      fetchAnalytics();
+                                    } catch (error) {
+                                      console.error('Error triggering analysis:', error);
+                                      alert(`Failed to trigger analysis: ${error.message}`);
+                                    }
+                                  }}
+                                  className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white text-xs rounded font-medium transition-colors flex items-center gap-1"
+                                  title="Manually trigger LLM analysis"
+                                >
+                                  <Brain className="w-3 h-3" />
+                                  Analyze
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Preview (if transcript already present) */}
+                            {analytics.transcript ? (
+                              <button
+                                onClick={() =>
+                                  setSelectedTranscript({
+                                    text: analytics.transcript,
+                                    language: analytics.detected_language,
+                                    filename: analytics.filename || file.filename,
+                                  })
+                                }
+                                className="w-full text-left bg-blue-50 border border-blue-200 rounded p-3 text-sm text-gray-700 hover:bg-blue-100 hover:border-blue-300 transition-colors cursor-pointer"
+                              >
+                                <div className="truncate">
+                                  {analytics.transcript.split('\n')[0] ||
+                                    analytics.transcript.substring(0, 100)}
+                                </div>
+                                <div className="text-xs text-blue-600 mt-1">
+                                  Click to view full transcript
+                                </div>
+                              </button>
+                            ) : (
+                              <div className="flex items-center justify-between p-3 bg-gray-50 border border-dashed border-gray-300 rounded">
+                                <div className="text-xs text-gray-600">
+                                  Transcript not loaded. Fetch on demand to reduce initial load.
+                                </div>
+                                <button
+                                  disabled={transcriptLoadingId === analytics.file_id}
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    setTranscriptError(null);
+                                    setTranscriptLoadingId(analytics.file_id);
+                                    try {
+                                      const resp = await fetch(`/api/analytics/transcript/${analytics.file_id}`);
+                                      if (!resp.ok) {
+                                        const err = await resp.json().catch(() => ({}));
+                                        throw new Error(err.detail || 'Failed to fetch transcript');
+                                      }
+                                      const json = await resp.json();
+                                      setSelectedTranscript({
+                                        text: json.transcript || '',
+                                        language: analytics.detected_language,
+                                        filename: analytics.filename || file.filename,
+                                      });
+                                    } catch (err) {
+                                      console.error('Transcript fetch failed:', err);
+                                      setTranscriptError(err.message);
+                                    } finally {
+                                      setTranscriptLoadingId(null);
+                                    }
+                                  }}
+                                  className="px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs rounded font-medium transition-colors"
+                                >
+                                  {transcriptLoadingId === analytics.file_id ? 'Loading…' : 'View transcript'}
+                                </button>
+                              </div>
+                            )}
+
+                            {transcriptError && (
+                              <div className="mt-2 text-xs text-red-600">{transcriptError}</div>
+                            )}
+                          </div>
+
+                          {/* Raw LLM Analysis Output */}
+                          {analytics.analysis_json && (
+                            <div className="mt-3">
+                              <details className="bg-gray-50 border border-gray-200 rounded">
+                                <summary className="px-3 py-2 cursor-pointer hover:bg-gray-100 text-xs font-semibold text-gray-700 select-none">
+                                  Raw LLM Analysis Output
+                                </summary>
+                                <div className="p-3 border-t border-gray-200">
+                                  <pre className="p-3 bg-gray-900 text-green-400 border border-gray-700 rounded text-xs whitespace-pre-wrap max-h-96 overflow-y-auto font-mono">
+                                    {analytics.analysis_json}
+                                  </pre>
+                                </div>
+                              </details>
+                            </div>
+                          )}
+
+                          {/* LLM Statistics */}
+                          {(analytics.llm_total_tokens || analytics.llm_peak_memory_mb || analytics.analysis_duration_seconds) && (
+                            <div className="mt-3 bg-blue-50 border border-blue-200 rounded p-3">
+                              <div className="text-xs font-semibold text-blue-900 mb-2 uppercase">
+                                LLM Statistics
+                              </div>
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                                {analytics.llm_prompt_tokens && (
+                                  <div>
+                                    <div className="text-gray-600 font-medium">Prompt Tokens</div>
+                                    <div className="text-gray-900 font-semibold">{analytics.llm_prompt_tokens.toLocaleString()}</div>
+                                  </div>
+                                )}
+                                {analytics.llm_completion_tokens && (
+                                  <div>
+                                    <div className="text-gray-600 font-medium">Completion Tokens</div>
+                                    <div className="text-gray-900 font-semibold">{analytics.llm_completion_tokens.toLocaleString()}</div>
+                                  </div>
+                                )}
+                                {analytics.llm_total_tokens && (
+                                  <div>
+                                    <div className="text-blue-700 font-medium">Total Tokens</div>
+                                    <div className="text-blue-900 font-bold">{analytics.llm_total_tokens.toLocaleString()}</div>
+                                  </div>
+                                )}
+                                {analytics.llm_peak_memory_mb && (
+                                  <div>
+                                    <div className="text-gray-600 font-medium">Peak Memory</div>
+                                    <div className="text-gray-900 font-semibold">{analytics.llm_peak_memory_mb.toFixed(1)} MB</div>
+                                  </div>
+                                )}
+                                {analytics.analysis_duration_seconds && (
+                                  <div>
+                                    <div className="text-gray-600 font-medium">Duration</div>
+                                    <div className="text-gray-900 font-semibold">{analytics.analysis_duration_seconds}s</div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Error Message */}
+                          {analytics.error_message && (
+                            <div className="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2 flex items-start gap-1">
+                              <X className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                              <span>{analytics.error_message}</span>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* No Analytics Message */}
+                {!selectMode.isSelectMode && isExpanded && sessionAnalytics.length === 0 && (
+                  <div className="border-t border-gray-200 bg-gray-50 p-4">
+                    <div className="text-center">
+                      <p className="text-sm text-gray-500 mb-3">
+                        No analytics data available for this session
+                      </p>
+                      <p className="text-xs text-gray-400 mb-4">
+                        Files may need to be reprocessed to extract audio for AI analytics
+                      </p>
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          const files = ensureFilesArray(session.files);
+                          if (files.length === 0) {
+                            alert('No files found in this session');
+                            return;
+                          }
+                          
+                          const fileNames = files.slice(0, 3).map(f => f.filename).join(', ') + 
+                                          (files.length > 3 ? ` and ${files.length - 3} more` : '');
+                          
+                          if (!confirm(`Reprocess all ${files.length} file(s) in this session?\n\nFiles: ${fileNames}\n\nThis will:\n• Reset files to DISCOVERED state\n• Restart the entire processing pipeline\n• Extract audio for AI analytics\n• Queue transcription and analysis jobs`)) {
+                            return;
+                          }
+                          
+                          try {
+                            let successCount = 0;
+                            let errorCount = 0;
+                            const errors = [];
+                            
+                            for (const file of files) {
+                              try {
+                                const response = await fetch(`/api/files/${file.id}/reprocess`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' }
+                                });
+                                
+                                if (!response.ok) {
+                                  const error = await response.json();
+                                  throw new Error(error.detail || 'Failed to reprocess');
+                                }
+                                
+                                successCount++;
+                              } catch (error) {
+                                errorCount++;
+                                errors.push(`${file.filename}: ${error.message}`);
+                              }
+                            }
+                            
+                            if (successCount > 0) {
+                              alert(`Reprocessing queued!\n\n✓ ${successCount} file(s) queued for reprocessing${errorCount > 0 ? `\n✗ ${errorCount} file(s) failed` : ''}`);
+                              fetchSessions();
+                              fetchAnalytics();
+                            } else {
+                              alert(`Failed to reprocess files:\n\n${errors.join('\n')}`);
+                            }
+                          } catch (error) {
+                            console.error('Error reprocessing session:', error);
+                            alert(`Failed to reprocess session: ${error.message}`);
+                          }
+                        }}
+                        className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded font-medium transition-colors flex items-center gap-2 mx-auto"
+                        title="Reprocess all files in this session to extract audio and enable AI analytics"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                        Re-process Session
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          </div>
+        </div>
+      )}
+
+      {/* Transcript Modal */}
+      {selectedTranscript && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          onClick={() => setSelectedTranscript(null)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <div className="flex items-center gap-3">
+                <Mic className="w-5 h-5 text-blue-600" />
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-800">Transcript</h2>
+                  <p className="text-sm text-gray-600">
+                    {selectedTranscript.filename || 'Unknown File'}
+                  </p>
+                </div>
+                {selectedTranscript.language && (
+                  <span className="text-xs text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
+                    {selectedTranscript.language}
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => setSelectedTranscript(null)}
+                className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                title="Close"
+              >
+                <X className="w-5 h-5 text-gray-600" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="prose prose-sm max-w-none">
+                <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">
+                  {selectedTranscript.text}
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
+              <div className="text-sm text-gray-600">
+                {selectedTranscript.text.length} characters
+              </div>
+              <button
+                onClick={() => setSelectedTranscript(null)}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function Analytics(props) {
+  return (
+    <ErrorBoundary>
+      <AnalyticsInner {...props} />
+    </ErrorBoundary>
+  );
+}

@@ -1,0 +1,7 @@
+# FFmpeg binaries - too large for git
+# Download from https://evermeet.cx/ffmpeg/
+ffmpeg
+ffprobe
+
+# Keep this README
+!README.md

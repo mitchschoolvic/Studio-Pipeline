@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Bundle Information -->
+    <key>CFBundleName</key>
+    <string>{{APP_NAME}}</string>
+
+    <key>CFBundleDisplayName</key>
+    <string>Studio Pipeline</string>
+
+    <key>CFBundleIdentifier</key>
+    <string>{{BUNDLE_ID}}</string>
+
+    <key>CFBundleVersion</key>
+    <string>{{VERSION}}</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>{{VERSION}}</string>
+
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <key>CFBundleSignature</key>
+    <string>????</string>
+
+    <key>CFBundleExecutable</key>
+    <string>{{APP_NAME}}</string>
+
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+
+    <!-- Supported Platform -->
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.productivity</string>
+
+    <!-- UI Configuration -->
+    <key>NSHighResolutionCapable</key>
+    <true/>
+
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+
+    <!-- LSUIElement: false = shows in dock and menu bar -->
+    <key>LSUIElement</key>
+    <false/>
+
+    <!-- Copyright and Info -->
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2025 Studio Pipeline Team. All rights reserved.</string>
+
+    <key>CFBundleGetInfoString</key>
+    <string>Studio Pipeline - Automated video processing pipeline for ATEM FTP recordings</string>
+
+    <!-- URL Schemes (for future deep linking) -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>{{BUNDLE_ID}}</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>studiopipeline</string>
+            </array>
+        </dict>
+    </array>
+
+    <!-- Document Types (optional - for future file associations) -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Video File</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.mpeg-4</string>
+                <string>public.movie</string>
+            </array>
+        </dict>
+    </array>
+
+    <!-- Privacy - Network Usage Description -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Studio Pipeline needs local network access to connect to the ATEM FTP server and download video recordings.</string>
+
+    <!-- Privacy - File Access Description -->
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>Studio Pipeline needs access to your Desktop to save processed video files.</string>
+
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>Studio Pipeline needs access to your Documents folder to save processed video files.</string>
+
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>Studio Pipeline needs access to your Downloads folder to save processed video files.</string>
+
+    <key>NSRemovableVolumesUsageDescription</key>
+    <string>Studio Pipeline needs access to external drives to save processed video files.</string>
+
+    <!-- App Sandbox Entitlements -->
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+
+    <!-- Network Entitlements -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- File Access Entitlements -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+
+    <key>com.apple.security.files.downloads.read-write</key>
+    <true/>
+
+    <key>com.apple.security.temporary-exception.files.absolute-path.read-write</key>
+    <array>
+        <string>/tmp/</string>
+        <string>/private/tmp/</string>
+        <string>~/Library/Application Support/StudioPipeline/</string>
+        <string>~/Videos/StudioPipeline/</string>
+    </array>
+
+    <!-- Python Runtime Entitlements -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- Allow Loading Unsigned Code (for Python extensions like NumPy, ONNX) -->
+    <key>com.apple.security.cs.disable-executable-page-protection</key>
+    <true/>
+
+    <!-- Hardware Access (for audio/video processing) -->
+    <key>com.apple.security.device.audio-input</key>
+    <false/>
+
+    <key>com.apple.security.device.camera</key>
+    <false/>
+
+    <!-- Process Management -->
+    <key>com.apple.security.inherit</key>
+    <true/>
+
+    <!-- Application-Specific Settings -->
+    <key>ATSApplicationFontsPath</key>
+    <string>.</string>
+
+    <key>NSSupportsAutomaticTermination</key>
+    <true/>
+
+    <key>NSSupportsSuddenTermination</key>
+    <false/>
+
+    <!-- Launch Behavior -->
+    <key>LSBackgroundOnly</key>
+    <false/>
+
+    <key>LSEnvironment</key>
+    <dict>
+        <key>STUDIO_PIPELINE_BUNDLED</key>
+        <string>1</string>
+    </dict>
+
+    <!-- Python Specific -->
+    <key>PyRuntimeLocations</key>
+    <array>
+        <string>@executable_path/../Resources</string>
+        <string>@executable_path/backend</string>
+    </array>
+</dict>
+</plist>

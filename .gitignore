@@ -1,0 +1,282 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Frontend build
+frontend/dist/
+frontend/build/
+
+# Backend build
+backend/dist/
+backend/build/
+
+# Packaging
+*.app
+*.dmg
+*.pkg
+*.spec
+# PyInstaller
+*.manifest
+*.spec
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+*_backup_*.db
+pipeline_backup_*.db
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.part
+*.part.meta
+temp_processing/
+
+# Video files (test/output/processing)
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.flv
+*.m4v
+Video_test_files/
+oldtests/*.mp4
+oldtests/*.mov
+ftp_simulation/*.mp4
+ftp_simulation/*.mov
+output_files/
+
+# Audio files (except in models/)
+*.mp3
+*.wav
+*.m4a
+*.aac
+*.flac
+*.ogg
+test_external_audio/
+
+# Image files - thumbnails and generated content
+thumbnails/
+output_files/**/*.png
+output_files/**/*.jpg
+temp_processing/**/*.png
+temp_processing/**/*.jpg
+
+# Screenshots and images in root (keep only icon/ directory)
+/*.png
+/*.jpg
+/*.jpeg
+
+# App icon - keep these
+!icon/
+!icon/**
+# But still ignore .DS_Store in icon directory
+icon/.DS_Store
+
+# Compiled binaries and libraries
+*.dylib
+*.a
+*.exe
+*.dll
+
+# ML Models (too large for git - download separately)
+models/llm/
+models/whisper/**/*.npz
+models/whisper/**/*.safetensors
+models/whisper/**/*.pt
+models/whisper/**/*.pth
+models/whisper/**/*.ckpt
+models/*.task
+models/*.onnx
+!models/denoiser_model.onnx
+!models/README.md
+!models/whisper/**/README.md
+!models/whisper/**/config.json
+
+# Swift tool binaries (compiled executables)
+swift_tools/boost
+swift_tools/convert
+swift_tools/extract
+swift_tools/gesturetrim
+swift_tools/lame
+swift_tools/mp3converter
+swift_tools/remux
+swift_tools/split
+swift_tools/lib/*.dylib
+swift_tools/lib/*.a
+
+# FFmpeg binaries
+ffmpeg_bins/ffmpeg
+ffmpeg_bins/ffprobe
+
+# Build outputs and packaging
+*.app
+*.dmg
+*.pkg
+
+# Test outputs and gesture detection
+gesture_test/*.mp4
+gesture_test/*.mov
+gesture_test/output/
+test_external_audio/*.mp3
+test_external_audio/*.wav
+
+# Compiled test files
+oldtests/audio/
+oldtests/output/
+
+# Generated files and caches
+*.pyc
+.cache/
+.pytest_cache/
+__pycache__/
+
+# Documentation builds
+docs/_build/
+docs/.doctrees/
+
+# Concatenated context files (generated)
+*_concatenated.txt
+code_review_bundle.txt
+analytics_context.txt
+backend-log-*.txt
+log-analysis.txt
+slow-prcoessing-log.txt
+gesture_fail.txt
+priortise-program-processing.txt
+
+# City/Location specific files (generated)
+City-Files.txt
+KeysboroughFiles.txt
+
+# Scripts that contain paths or config
+check_*.py
+fix_*.py
+collect_context.py
+debug_scan.py
+reproduce_issue.py
+run_import.py
+
+# FTP simulation content
+ftp_simulation/*.mp3
+ftp_simulation/Video\ ISO\ Files/
+
+# Credentials and secrets (safety catch)
+*.pem
+*.key
+*.p12
+*.mobileprovision
+credentials.json
+secrets.json
+.env.local
+.env.*.local
+
+# macOS app signing
+*.entitlements.temp
+
+# Root directory - exclude development/analysis files
+# Keep only essential files for building and running
+*.xlsx
+*.xls
+*.zip
+*_concatenated.txt
+*_bundle.txt
+mlx-info.MD
+AI_Prompt.md
+ATEM Mini FTP quirks.md
+EXCEL_EXPORT_SUMMARY.md
+GESTURE_TRIM_IMPLEMENTATION_PLAN.md
+VIDEO_PIPELINE_ARCHITECTURE.md
+WORKER_STATUS_IMPLEMENTATION.md
+PIPELINE_WEBSOCKET_*.md
+SCHEMA_*.md
+UI-mockup.js
+steps_mockup.jsx
+analytics_context.txt
+atem_quirks_instruct.txt
+backend-log-*.txt
+code_review_bundle.txt
+codebase_fix_plan.md
+languge_names.md
+prompt.md
+websocketsPLAN.md
+City-Files.txt
+KeysboroughFiles.txt
+Documentation/
+AI_PLAN/
+file_manager_reference/
+ftp_simulation/
+ftp_transfer_reference/
+gesture_test/
+/oldtests
+/thumbnail_plan
+/video_processor_reference
+/test_external_audio
+
+
+# Root directory scripts - exclude dev/debug scripts
+check_*.py
+collect_context.py
+concatenate_*.py
+debug_*.py
+fix_*.py
+inspect_*.py
+merge-all.py
+reproduce_issue.py
+reset_*.py
+run_import.py
+test_*.py
+test_*.sh
+check_*.sh

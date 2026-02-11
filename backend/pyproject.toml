@@ -1,0 +1,66 @@
+[project]
+name = "studio-pipeline"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    # Web framework
+    "fastapi==0.115.0",
+    "uvicorn[standard]==0.32.0",
+    "pydantic==2.10.0",
+    "python-multipart==0.0.20",
+    "websockets==12.0",
+    # Database
+    "sqlalchemy==2.0.36",
+    # FTP client
+    "aioftp==0.22.3",
+    # Filesystem monitoring
+    "watchdog>=3.0.0",
+    # System integration
+    "keyring==25.5.0",
+    # Audio processing (neural net denoiser - not AI/LLM)
+    "numpy>=1.26.0",
+    "soundfile>=0.12.0",
+    "librosa>=0.10.0",
+    "onnxruntime>=1.16.0",
+]
+
+[project.optional-dependencies]
+# AI/LLM features for analytics (install with: pip install -e .[ai])
+ai = [
+    "mlx-whisper>=0.4.1",
+    "mlx-lm>=0.28.4",
+    "mlx-vlm>=0.3.9",
+    "huggingface-hub>=0.26.2",
+    "transformers>=4.57.3",
+    "protobuf>=3.20.0",
+    "openpyxl>=3.1.0",
+]
+dev = [
+    "pytest==7.4.4",
+    "pytest-asyncio==0.23.3",
+    "httpx==0.26.0",
+    "black==24.1.1",
+    "ruff==0.1.13",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["api", "workers", "services"]
+
+[tool.black]
+line-length = 100
+target-version = ['py312']
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "integration: Integration tests that require external services (FTP, etc.)",
+]
